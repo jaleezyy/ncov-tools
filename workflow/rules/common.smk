@@ -73,7 +73,11 @@ def get_primer_trimmed_bam_for_sample(wildcards):
     if config['platform'] == 'oxford-nanopore':
         return "%s/{sample}.primertrimmed.rg.sorted.bam" % config['data_root']
     elif config['platform'] == 'illumina':
-        return "%s/{sample}.mapped.primertrimmed.sorted.bam" % config['data_root']
+        if os.path.exists(os.path.join(config['data_root'], "{sample}.mapped.primertrimmed.sorted.bam")):
+            return "%s/{sample}.mapped.primertrimmed.sorted.bam" % config['data_root']
+        else:
+            return "%s/{sample}.sorted.bam" % config['data_root']
+        #return "%s/{sample}.mapped.primertrimmed.sorted.bam" % config['data_root']
     else:
         sys.stderr.write("Error: unrecognized platform")
         sys.exit(1)
