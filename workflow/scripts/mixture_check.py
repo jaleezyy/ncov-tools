@@ -113,6 +113,10 @@ def calculate(sample_a, sample_b, variants, counts):
         if allele_a == allele_b:
             continue
 
+        # skip the sample if it isn't in counts
+        if sample_a not in counts:
+            continue
+
         # skip positions without any depth
         if var not in counts[sample_a]:
             continue
@@ -194,7 +198,9 @@ def load_msa_alleles(alleles_fn):
                 out[sample] = dict()
             ra = row['ref_allele']
             ca = row['alt_allele'] # consensus allele, can be ambiguous
-            if ca == "N":
+            
+            # ignore Ns and singletons
+            if ca == "N" or int(row['samples_with_allele']) == 1:
                 continue
             aa = resolve_iupac(ca, ra)
 
@@ -255,7 +261,7 @@ for s in all_samples:
         counts[s] = count_variant_support_from_fpileup(fpileup_files[s], variant_union)
     else:
         sys.stderr.write("Could not find sequencing data for %s\n" % (s))
-        sys.exit(1)
+        #sys.exit(1)
 
 # determine sample set to use
 outer_samples = all_samples

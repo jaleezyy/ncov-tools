@@ -1,23 +1,10 @@
-plot_depth_by_amplicon <- function(df, outname)
-{
-    ggplot(df, aes(x=sample, y=mean_coverage)) +
-        geom_point() +
-        scale_y_log10() +
-        facet_wrap(. ~ amplicon_id) +
-        theme_bw() +
-        theme(axis.text.x = element_text(angle = 90, hjust = 1))
-
-        ggsave(outname, width=15, height=10)
-}
 
 plot_depth_by_amplicon_and_ct <- function(df, metadata, outname)
 {
     # merge df with metadata
     merged = dplyr::inner_join(df, metadata, by = "sample")
 
-    summary <- merged %>% group_by(sample, amplicon_id, ct)  %>% summarise(mean_coverage=mean(depth))
-
-    ggplot(summary, aes(x=ct, y=mean_coverage)) +
+    ggplot(merged, aes(x=ct, y=mean_depth)) +
         geom_point() +
         scale_y_log10() +
         facet_wrap(. ~ amplicon_id) +
@@ -41,15 +28,15 @@ plot_fraction_covered_by_amplicon <- function(df, outname)
 plot_depth_per_base <- function(df, metadata, outname)
 {
     # merge df with metadata
-    merged = dplyr::full_join(df, metadata, by = "sample")
+    merged = dplyr::left_join(df, metadata, by = "sample")
 
     # construct new column containing the facet label
     merged$label = paste(merged$sample, " Ct: ", merged$ct, sep="")
 
     num_samples = length(unique(merged$sample))
-    plots_per_page = 8
+    plots_per_page = min(8, num_samples)
 
-    pdf(outname, width=8, height=16)
+    pdf(outname, width=8, height=2*plots_per_page)
 
     for(i in seq(1, ceiling(num_samples / plots_per_page))) {
         # bedtools coverage reports the position along the interval, adding start gives
@@ -57,27 +44,8 @@ plot_depth_per_base <- function(df, metadata, outname)
         p <- ggplot(merged, aes(x=start + position, y=depth)) +
             geom_line() +
             scale_y_log10() +
-            facet_wrap_paginate(. ~ label, nrow=8, ncol=1, page=i) +
+            facet_wrap_paginate(. ~ label, nrow=plots_per_page, ncol=1, page=i) +
             xlab("Genome position (nt)") +
-            theme_bw()
-        print(p)
-    }
-    dev.off()
-}
-
-plot_alt_frequency <- function(df, outname)
-{
-    pdf(outname, width=8, height=24)
-    num_samples = length(unique(df$sample))
-    plots_per_page = 8
-
-    for(i in seq(1, ceiling(num_samples / plots_per_page))) {
-        p <- ggplot(df, aes(x=position, y=alt_frequency, color=depth)) +
-            geom_line() +
-            facet_wrap_paginate(. ~ sample, nrow=plots_per_page, ncol=1, page=i) +
-            #scale_colour_gradient(low = "white", high = "black") +
-            xlab("Genome position (nt)") +
-            ylab("Alt Frequency") +
             theme_bw()
         print(p)
     }
@@ -127,25 +95,33 @@ read_qc_csv <- function(fn) {
 library(ggplot2)
 library(dplyr)
 library(ggforce)
+library(argparse)
 
 if(!interactive()) {
-    #mean_coverage <- read_glob("qc_sequencing", "*.mean_coverage.bed")
-    #plot_depth_by_amplicon(mean_coverage)
 
-    args = commandArgs(trailingOnly=TRUE)
-    if(length(args) == 0) {
+# Main
+    parser <- ArgumentParser(description="Generate various QC plots")
+
+    parser$add_argument('--directory', '-d', default="qc_sequencing",
+                        help="directory containing the input files")
+    parser$add_argument('--plot-type', '-t', default="depth_by_position",
+                        help="the type of plot to generate")
+    parser$add_argument("--output", "-o", default="",
+                        help="name of the output plot")
+    parser$add_argument("--metadata", "-m", default="",
+                        help="optional metadata file to annotate the plot with")
+    args <- parser$parse_args()
+    
+    if(args$output == "") {
         q()
     }
-
-    command = args[1]
-    prefix = args[2]
 
     # metadata is optional so we make a default table here
     metadata = data.frame(sample=character(),
                           ct=double())
 
-    if(length(args) == 3) {
-        metadata.raw <- read.table(args[3], header=T, sep="\t")
+    if(args$metadata != "") {
+        metadata.raw <- read.table(args$metadata, header=T, sep="\t")
 
         # clean metadata of unknown Cts
         metadata = subset(metadata.raw, ct != "unknown")
@@ -154,35 +130,29 @@ if(!interactive()) {
         metadata$ct = as.numeric(as.character(metadata$ct))
     }
 
-    if(command == "depth_by_position") {
+    if(args$plot_type == "depth_by_position") {
 
         df <- read_glob("qc_sequencing", "*.per_base_coverage.bed")
-        outname = sprintf("plots/%s_depth_by_position.pdf", prefix)
-        plot_depth_per_base(df, metadata, outname)
+        plot_depth_per_base(df, metadata, args$output)
 
-    } else if(command == "amplicon_depth_by_ct") {
+    } else if(args$plot_type == "negative_control_depth_by_position") {
 
-        df <- read_glob("qc_sequencing", "*.per_base_coverage.bed")
-        outname = sprintf("plots/%s_amplicon_depth_by_ct.pdf", prefix)
-        plot_depth_by_amplicon_and_ct(df, metadata, outname)
+        df <- read_glob("qc_sequencing_negative_control", "*.per_base_coverage.bed")
+        plot_depth_per_base(df, metadata, args$output)
 
-    } else if(command == "amplicon_covered_fraction") {
+    } else if(args$plot_type == "amplicon_depth_by_ct") {
+
+        df <- read_glob("qc_sequencing", "*.amplicon_depth.bed")
+        plot_depth_by_amplicon_and_ct(df, metadata, args$output)
+
+    } else if(args$plot_type == "amplicon_covered_fraction") {
 
         df <- read_glob("qc_sequencing", "*.amplicon_coverage.bed")
-        outname = sprintf("plots/%s_amplicon_covered_fraction.pdf", prefix)
-        plot_fraction_covered_by_amplicon(df, outname)
+        plot_fraction_covered_by_amplicon(df, args$output)
 
-    } else if(command == "alt_allele_frequency") {
+    } else if(args$plot_type == "genome_completeness_by_ct") {
 
-        df <- read_glob("qc_sequencing", "*.fpileup.tsv")
-        outname = sprintf("plots/%s_alt_frequency.pdf", prefix)
-        plot_alt_frequency(df, outname)
-
-    } else if(command == "genome_completeness_by_ct") {
-        
         df <- read_qc_csv("qc_analysis/merged.qc.csv")
-        outname = sprintf("plots/%s_genome_completeness_by_ct.pdf", prefix)
-        plot_genome_completeness_by_ct(df, metadata, outname)
-
+        plot_genome_completeness_by_ct(df, metadata, args$output)
     }
 }
